@@ -1,0 +1,24 @@
+# ── Core LangKit stack ──────────────────────────────────────────────────────
+# Pin to Python 3.11 / 3.12 — torch & transformers lag Python 3.13 releases.
+langkit[all]>=0.0.28
+whylogs>=1.3.18
+
+# ── ML back-end (LangKit injection/jailbreak classifiers need these) ─────────
+torch>=2.1.0
+transformers>=4.38.0
+sentence-transformers>=2.6.0
+
+# ── Part 2 (Sandbox – OpenAI Brain) ─────────────────────────────────────────
+openai>=1.30.0
+
+# ── Part 3 (FastAPI backend) ────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+jinja2>=3.1.3
+python-multipart>=0.0.9
+
+# ── Evaluation helpers ───────────────────────────────────────────────────────
+scikit-learn>=1.4.0
+pandas>=2.2.0
+python-dotenv>=1.0.0
+datasets>=2.19.0

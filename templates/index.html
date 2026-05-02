@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prompt Injection Detector</title>
+  <!-- Tailwind via CDN — no build step needed -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: "#6366f1", dark: "#4f46e5" }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-mono">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header class="border-b border-gray-800 px-6 py-4 flex items-center gap-3">
+    <span class="text-brand text-xl font-bold">&#9632;</span>
+    <h1 class="text-lg font-bold tracking-tight">Prompt Injection Detector</h1>
+    <span class="ml-auto text-xs text-gray-500">LangKit + GPT-4o &middot; CS Security Project</span>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-8 space-y-10">
+
+    <!-- ── Live Analyzer ──────────────────────────────────────────────────── -->
+    <section>
+      <h2 class="text-sm font-semibold uppercase tracking-widest text-gray-400 mb-3">
+        Live Analyzer
+      </h2>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+        <textarea
+          id="promptInput"
+          rows="3"
+          placeholder="Enter a prompt to analyze…"
+          class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-sm
+                 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-brand
+                 resize-none"
+        ></textarea>
+        <div class="flex items-center gap-3">
+          <button
+            onclick="analyze()"
+            class="bg-brand hover:bg-brand-dark transition-colors px-5 py-2 rounded-lg
+                   text-sm font-semibold"
+          >
+            Analyze
+          </button>
+          <span id="spinner" class="hidden text-xs text-gray-400 animate-pulse">Scoring…</span>
+        </div>
+
+        <!-- Result card (hidden until first analysis) -->
+        <div id="resultCard" class="hidden mt-2">
+          <div id="actionBadge"
+               class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3">
+          </div>
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div class="bg-gray-800 rounded-lg px-4 py-3">
+              <p class="text-gray-400 text-xs mb-1">Injection Score</p>
+              <p id="injScore" class="text-xl font-bold">—</p>
+              <div class="mt-2 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                <div id="injBar" class="h-full rounded-full bg-brand transition-all duration-500" style="width:0%"></div>
+              </div>
+            </div>
+            <div class="bg-gray-800 rounded-lg px-4 py-3">
+              <p class="text-gray-400 text-xs mb-1">Jailbreak Score</p>
+              <p id="jbScore" class="text-xl font-bold">—</p>
+              <div class="mt-2 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                <div id="jbBar" class="h-full rounded-full bg-brand transition-all duration-500" style="width:0%"></div>
+              </div>
+            </div>
+          </div>
+          <div id="reasonsList" class="mt-3 space-y-1 text-xs text-gray-400"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Eval Metrics (shown only if evaluation_results.json exists) ────── -->
+    {% if has_results and metrics %}
+    <section>
+      <h2 class="text-sm font-semibold uppercase tracking-widest text-gray-400 mb-3">
+        Evaluation Results &mdash; LangKit vs GPT-4o Ground Truth
+      </h2>
+
+      <!-- KPI cards -->
+      <div class="grid grid-cols-3 gap-4 mb-6">
+        {% set kpis = [
+          ("Precision", metrics.precision, "Of what was blocked, this % were real attacks"),
+          ("Recall",    metrics.recall,    "Of all real attacks, this % were caught"),
+          ("F1 Score",  metrics.f1_score,  "Harmonic mean — overall detector quality"),
+        ] %}
+        {% for label, val, tip in kpis %}
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center group relative">
+          <p class="text-gray-400 text-xs uppercase tracking-widest mb-1">{{ label }}</p>
+          <p class="text-4xl font-bold
+            {% if val >= 0.8 %}text-emerald-400
+            {% elif val >= 0.6 %}text-yellow-400
+            {% else %}text-red-400{% endif %}">
+            {{ "%.2f"|format(val) }}
+          </p>
+          <p class="text-gray-600 text-xs mt-2 group-hover:text-gray-400 transition-colors">{{ tip }}</p>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Confusion matrix -->
+      {% set cm = metrics.confusion_matrix %}
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+        <h3 class="text-xs uppercase tracking-widest text-gray-400 mb-4">Confusion Matrix</h3>
+        <div class="flex justify-center">
+          <table class="text-sm border-separate border-spacing-1">
+            <thead>
+              <tr>
+                <th class="text-gray-600 text-xs pb-2 pr-4"></th>
+                <th class="text-gray-400 text-xs pb-2 text-center">Predicted: Injection</th>
+                <th class="text-gray-400 text-xs pb-2 text-center">Predicted: Safe</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-gray-400 text-xs pr-4 text-right">Actual: Injection</td>
+                <td class="bg-emerald-900/40 border border-emerald-700 rounded-lg px-6 py-4 text-center">
+                  <p class="text-2xl font-bold text-emerald-400">{{ cm.TP }}</p>
+                  <p class="text-xs text-emerald-600 mt-1">TP</p>
+                </td>
+                <td class="bg-red-900/30 border border-red-800 rounded-lg px-6 py-4 text-center">
+                  <p class="text-2xl font-bold text-red-400">{{ cm.FN }}</p>
+                  <p class="text-xs text-red-600 mt-1">FN &mdash; missed</p>
+                </td>
+              </tr>
+              <tr>
+                <td class="text-gray-400 text-xs pr-4 text-right">Actual: Safe</td>
+                <td class="bg-yellow-900/30 border border-yellow-800 rounded-lg px-6 py-4 text-center">
+                  <p class="text-2xl font-bold text-yellow-400">{{ cm.FP }}</p>
+                  <p class="text-xs text-yellow-600 mt-1">FP &mdash; false alarm</p>
+                </td>
+                <td class="bg-emerald-900/40 border border-emerald-700 rounded-lg px-6 py-4 text-center">
+                  <p class="text-2xl font-bold text-emerald-400">{{ cm.TN }}</p>
+                  <p class="text-xs text-emerald-600 mt-1">TN</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Sample records table ───────────────────────────────────────────── -->
+    {% if records %}
+    <section>
+      <h2 class="text-sm font-semibold uppercase tracking-widest text-gray-400 mb-3">
+        Sample Evaluation Records (first 20)
+      </h2>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-800 text-gray-400 uppercase tracking-wider">
+            <tr>
+              <th class="px-4 py-3 text-left">Prompt</th>
+              <th class="px-4 py-3 text-center">Inj</th>
+              <th class="px-4 py-3 text-center">Guard</th>
+              <th class="px-4 py-3 text-center">Judge</th>
+              <th class="px-4 py-3 text-center">Match</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            {% for r in records %}
+            {% set lk = r.langkit_label %}
+            {% set gt = r.judge_label if r.judge_label is not none else r.dataset_label %}
+            {% set match = (lk == gt) %}
+            <tr class="hover:bg-gray-800/50 transition-colors">
+              <td class="px-4 py-3 max-w-xs truncate text-gray-300">{{ r.prompt[:80] }}{% if r.prompt|length > 80 %}…{% endif %}</td>
+              <td class="px-4 py-3 text-center text-gray-300">
+                {{ "%.2f"|format(r.injection_score) if r.injection_score is not none else "—" }}
+              </td>
+              <td class="px-4 py-3 text-center">
+                {% if r.langkit_flagged %}
+                  <span class="px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 border border-red-800">BLOCKED</span>
+                {% else %}
+                  <span class="px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-400 border border-emerald-800">ALLOWED</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 text-center">
+                {% if gt == 1 %}
+                  <span class="text-red-400">Injection</span>
+                {% else %}
+                  <span class="text-emerald-400">Safe</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 text-center text-lg">
+                {% if match %}✓{% else %}<span class="text-yellow-400">✗</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+    {% else %}
+    <section class="bg-gray-900 border border-dashed border-gray-700 rounded-xl p-8 text-center">
+      <p class="text-gray-400 text-sm">No evaluation data yet.</p>
+      <p class="text-gray-600 text-xs mt-1">Run <code class="text-brand">python evaluator.py --dry-run</code> to generate results.</p>
+    </section>
+    {% endif %}
+
+  </main>
+
+  <!-- ── Live analyzer JS (no framework, ~30 lines) ────────────────────────── -->
+  <script>
+    async function analyze() {
+      const prompt = document.getElementById("promptInput").value.trim();
+      if (!prompt) return;
+
+      document.getElementById("spinner").classList.remove("hidden");
+      document.getElementById("resultCard").classList.add("hidden");
+
+      const form = new FormData();
+      form.append("prompt", prompt);
+
+      try {
+        const res  = await fetch("/analyze", { method: "POST", body: form });
+        const data = await res.json();
+
+        const inj = data.injection_score ?? 0;
+        const jb  = data.jailbreak_score ?? 0;
+
+        document.getElementById("injScore").textContent = inj.toFixed(4);
+        document.getElementById("jbScore").textContent  = jb.toFixed(4);
+        document.getElementById("injBar").style.width   = (inj * 100) + "%";
+        document.getElementById("jbBar").style.width    = (jb  * 100) + "%";
+
+        const badge    = document.getElementById("actionBadge");
+        const blocked  = data.flagged;
+        badge.textContent = blocked ? "🚨 BLOCKED" : "✅ ALLOWED";
+        badge.className   = "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 "
+          + (blocked
+              ? "bg-red-900/50 text-red-300 border border-red-700"
+              : "bg-emerald-900/50 text-emerald-300 border border-emerald-700");
+
+        const reasonsEl = document.getElementById("reasonsList");
+        reasonsEl.innerHTML = (data.reasons || [])
+          .map(r => `<p class="text-yellow-500">⚠ ${r}</p>`).join("");
+
+        document.getElementById("resultCard").classList.remove("hidden");
+      } finally {
+        document.getElementById("spinner").classList.add("hidden");
+      }
+    }
+
+    // Allow Ctrl+Enter to submit
+    document.getElementById("promptInput").addEventListener("keydown", e => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) analyze();
+    });
+  </script>
+
+</body>
+</html>
